@@ -4,7 +4,7 @@ import org.apache.spark.SparkConf
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.ScalaReflection
 import org.apache.spark.sql.functions._
-import org.apache.spark.sql.types.{StringType, StructField, StructType}
+import org.apache.spark.sql.types.{StringType, StructField, StructType, TimestampType}
 
 object AppSStream {
 
@@ -56,9 +56,10 @@ object AppSStream {
         StructField("type", StringType, false))
     )
     val records = df
-      .selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)", "CAST(timestamp as TIMESTAMP)")
-      .select($"timestamp", from_json($"value", eventScheme) as "event")
-      .select("timestamp", "event.*")
+      .selectExpr("CAST(key AS STRING)", "CAST(value AS STRING)")
+      .select(from_json($"value", eventScheme) as "event")
+      .select("event.*")
+      .select($"ip", $"category_id", $"type", from_unixtime($"unix_time") as "timestamp")
 
     // #################
     //NActs by ip
