@@ -1,39 +1,53 @@
-package BotChecker
+package BotChecker.dstream
 
 import BotChecker.data.Event
+import com.datastax.spark.connector._
+import com.datastax.spark.connector.writer.{TTLOption, WriteConf}
 import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.apache.spark.SparkConf
 import org.apache.spark.streaming.dstream.DStream
 import org.apache.spark.streaming.kafka010.ConsumerStrategies.Subscribe
+import org.apache.spark.streaming.kafka010.KafkaUtils
 import org.apache.spark.streaming.kafka010.LocationStrategies.PreferConsistent
-import org.apache.spark.streaming.kafka010._
 import org.apache.spark.streaming.{Seconds, StreamingContext}
 
 object AppDStream {
 
-  val CHECKPOINT_DIRECTORY = "/Users/avaniukov/Documents/Training/Streaming/BotGen/checkpoints"
+  val CheckpointDirectory = "/Users/avaniukov/Documents/Training/Streaming/BotGen/checkpoints"
 
-  val IP_FIELD = "ip"
-  val CATEGORY_FIELD = "category_id"
-  val TYPE_FIELD = "type"
-  val UNIX_TIME_FIELD = "unix_time"
+  val IpField = "ip"
+  val CategoryField = "category_id"
+  val TypeField = "type"
+  val UnixTimeField = "unix_time"
 
-  val VIEW_TYPE = "view"
-  val CLICK_TYPE = "click"
+  val ViewType = "view"
+  val ClickType = "click"
 
-  val LATENCY_DUR = 10
-  val SLIDE_DUR = 30
-  val WINDOW_DUR = 60
-  val TERMINATION_WAIT_TIME = 5
+  val LatencyDur = 10
+  val SlideDur = 30
+  val WindowDur = 60
+  val TerminationWaitTime = 5
 
-  val PRINT_LIMIT = 1000
+  val ClicksLimit = 1000
+  val CategoryLimit = 5
+  val OverClicksAndViewsLimit = 5
+
+  val CassandraKeySpace = "keyspace0"
+  val CassandraTable = "blockedips"
+  val CassandraTtl = 60
+
+  val PrintLimit = 1000
 
   def main(args: Array[String]): Unit = {
 
-    val conf = new SparkConf().setMaster("local[2]").setAppName("DSBotChecker")
-    val ssc = new StreamingContext(conf, Seconds(LATENCY_DUR))
-    ssc.checkpoint(CHECKPOINT_DIRECTORY)
+    val conf = new SparkConf()
+      .setMaster("local[2]")
+      .setAppName("DSBotChecker")
+      .set("spark.cassandra.connection.keep_alive_ms", "630000")
+
+    val ssc = new StreamingContext(conf, Seconds(LatencyDur))
+    ssc.checkpoint(CheckpointDirectory)
 
     val kafkaParams = Map[String, Object](
       "bootstrap.servers" -> "localhost:9092",
@@ -55,7 +69,7 @@ object AppDStream {
 
     val convertStream = stream.map(record => {
       val r: JsonNode = parser.readTree(record.value())
-      (r.get(IP_FIELD).asText(), createEvent(r))
+      (r.get(IpField).asText(), createEvent(r))
     })
 
     // #################
@@ -74,40 +88,34 @@ object AppDStream {
     resNActs
       .union(resOverClickView)
       .union(resCat)
-      .countByValueAndWindow(Seconds(WINDOW_DUR), Seconds(WINDOW_DUR))
-      .map(k => k._1)
+      .countByValueAndWindow(Seconds(WindowDur), Seconds(WindowDur))
+      .map(k => (k._1, 0))
       .foreachRDD(
         rdd => {
-          rdd.foreachPartition(
-            partitionRDD => {
-              //TODO upload into DB: Check existing IP into DB, insert IP if not exist
-              partitionRDD.foreach(println)
-            }
-          )
+          rdd.saveToCassandra(CassandraKeySpace, CassandraTable, SomeColumns("ip"), writeConf = WriteConf(ttl = TTLOption.constant(CassandraTtl)))
         }
       )
 
     println("Start streaming")
     ssc.start()
-    val stopped = ssc.awaitTerminationOrTimeout((WINDOW_DUR+TERMINATION_WAIT_TIME) * 1000)
+    val stopped = ssc.awaitTerminationOrTimeout(Seconds(WindowDur + TerminationWaitTime).milliseconds)
     println(s"Finished streaming: ${stopped}")
   }
 
   def createEvent(record: JsonNode): Event = {
-    new Event(record.get(TYPE_FIELD).asText(), record.get(IP_FIELD).asText(), record.get(CATEGORY_FIELD).asText(), record.get(UNIX_TIME_FIELD).asText())
+    new Event(record.get(TypeField).asText(), record.get(IpField).asText(), record.get(CategoryField).asText(), record.get(UnixTimeField).asText())
   }
 
   def filterByNActs(pair: (String, Int)): Boolean = {
-    val limitActs = 1000
-    pair._2 > limitActs
+    pair._2 > ClicksLimit
   }
 
   def filterByViewAct(pair: ((String, String), Int)): Boolean = {
-    pair._1._2 == VIEW_TYPE
+    pair._1._2 == ViewType
   }
 
   def filterByClickAct(pair: ((String, String), Int)): Boolean = {
-    pair._1._2 == CLICK_TYPE
+    pair._1._2 == ClickType
   }
 
   def detectBotsByNActs(events: DStream[(String, Event)]): DStream[String] = {
@@ -116,9 +124,9 @@ object AppDStream {
       .map(r => (r._1, 1))
       .reduceByKeyAndWindow((a: Int, b: Int) => {
         a + b
-      }, Seconds(WINDOW_DUR), Seconds(SLIDE_DUR))
+      }, Seconds(WindowDur), Seconds(SlideDur))
 
-    nActsStream.print(PRINT_LIMIT)
+    //nActsStream.print(PRINT_LIMIT)
 
     nActsStream
       .filter(filterByNActs)
@@ -131,7 +139,7 @@ object AppDStream {
       .map(r => ((r._1, r._2.kind), 1))
       .reduceByKeyAndWindow((a: Int, b: Int) => {
         a + b
-      }, Seconds(WINDOW_DUR), Seconds(SLIDE_DUR))
+      }, Seconds(WindowDur), Seconds(SlideDur))
 
     val clickActsStream = ipTypeStream
       .filter(filterByClickAct).map(r => (r._1._1, (r._1._2, r._2)))
@@ -143,28 +151,27 @@ object AppDStream {
       .join(viewActsStream)
       .map(r => (r._1, r._2._1._2 / r._2._2._2))
 
-    clickAndViewStream.print(PRINT_LIMIT)
+    //clickAndViewStream.print(PrintLimit)
 
     clickAndViewStream
-      .filter(r => r._2 > 5)
+      .filter(r => r._2 > OverClicksAndViewsLimit)
       .map(r => r._1)
   }
 
   def detectBotsByCategory(events: DStream[(String, Event)]): DStream[String] = {
 
     val categories = events
-      .map(r => ((r._1, r._2.category, r._2.kind), 1))
+      .map(r => ((r._1, r._2.category), 1))
       .reduceByKeyAndWindow((a: Int, b: Int) => {
         a + b
-      }, Seconds(WINDOW_DUR), Seconds(SLIDE_DUR))
-      .filter(r => r._1._3 == VIEW_TYPE)
+      }, Seconds(WindowDur), Seconds(SlideDur))
       .map(r => r._1._1)
       .countByValue()
 
-    categories.print(PRINT_LIMIT)
+    categories.print(PrintLimit)
 
     categories
-      .filter(r => r._2 > 5)
+      .filter(r => r._2 > CategoryLimit)
       .map(r => r._1)
   }
 }
