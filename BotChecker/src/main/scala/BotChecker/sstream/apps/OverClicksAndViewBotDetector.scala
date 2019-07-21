@@ -5,7 +5,7 @@ import com.datastax.spark.connector.cql.CassandraConnector
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.functions.{from_json, from_unixtime, window}
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
-import org.apache.spark.sql.{ForeachWriter, Row, SparkSession}
+import org.apache.spark.sql.{DataFrame, ForeachWriter, Row, SparkSession}
 
 object OverClicksAndViewBotDetector {
 
@@ -36,16 +36,16 @@ object OverClicksAndViewBotDetector {
       .setAppName("SSBotChecker")
       .set("spark.cassandra.connection.keep_alive_ms", "630000")
 
-    val spark = SparkSession
+    val sparkSession = SparkSession
       .builder()
       .config(conf)
       .getOrCreate()
 
-    val connector = CassandraConnector.apply(spark.sparkContext)
+    val connector = CassandraConnector.apply(sparkSession.sparkContext)
 
-    import spark.implicits._
+    import sparkSession.implicits._
 
-    val df = spark
+    val df = sparkSession
       .readStream
       .format("kafka")
       .option("kafka.bootstrap.servers", "localhost:9092")
@@ -68,7 +68,33 @@ object OverClicksAndViewBotDetector {
 
     // #################
     // Count ip <-> type
-    val resOverClickView = records
+    val resOverClickView = detectBotsByClickAndView(records, sparkSession)
+
+    val query = resOverClickView.writeStream
+      .outputMode("complete")
+      .foreach(new ForeachWriter[Row] {
+        override def open(partitionId: Long, epochId: Long): Boolean = true
+
+        override def process(value: Row): Unit = {
+          connector.withSessionDo(session => {
+            val query = s"INSERT INTO $CassandraKeySpace.$CassandraTable (ip) VALUES ('${value.getAs[String]("ip")}') USING TTL $CassandraTtl"
+            session.execute(query)
+          })
+        }
+
+        override def close(errorOrNull: Throwable): Unit = {
+        }
+      })
+      .start()
+
+    query.awaitTermination()
+  }
+
+  def detectBotsByClickAndView(events: DataFrame, sparkSession: SparkSession): DataFrame = {
+
+    import sparkSession.implicits._
+
+    events
       .groupBy($"ip", $"type", window($"timestamp", WindowDur))
       .count()
       .groupByKey(row => row.getAs[String]("ip"))
@@ -94,30 +120,5 @@ object OverClicksAndViewBotDetector {
       .filter($"_2")
       .select($"_1")
       .withColumnRenamed("_1", "ip")
-
-    //    val query = resOverClickView.writeStream
-    //      .outputMode("complete")
-    //      .format("console")
-    //      .option("numRows", PrintLimit)
-    //      .start()
-
-    val query = resOverClickView.writeStream
-      .outputMode("complete")
-      .foreach(new ForeachWriter[Row] {
-        override def open(partitionId: Long, epochId: Long): Boolean = true
-
-        override def process(value: Row): Unit = {
-          connector.withSessionDo(session => {
-            val query = s"INSERT INTO $CassandraKeySpace.$CassandraTable (ip) VALUES ('${value.getAs[String]("ip")}') USING TTL $CassandraTtl"
-            session.execute(query)
-          })
-        }
-
-        override def close(errorOrNull: Throwable): Unit = {
-        }
-      })
-      .start()
-
-    query.awaitTermination()
   }
 }

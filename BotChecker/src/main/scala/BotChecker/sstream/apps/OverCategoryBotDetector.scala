@@ -3,7 +3,7 @@ package BotChecker.sstream.apps
 import BotChecker.sstream.apps.NActsBotDetector.{CassandraKeySpace, CassandraTtl}
 import com.datastax.spark.connector.cql.CassandraConnector
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.{ForeachWriter, Row, SparkSession}
+import org.apache.spark.sql.{DataFrame, ForeachWriter, Row, SparkSession}
 import org.apache.spark.sql.functions.{from_json, from_unixtime, window}
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 
@@ -37,16 +37,16 @@ object OverCategoryBotDetector {
       .setAppName("SSBotChecker")
       .set("spark.cassandra.connection.keep_alive_ms", "630000")
 
-    val spark = SparkSession
+    val sparkSession = SparkSession
       .builder()
       .config(conf)
       .getOrCreate()
 
-    val connector = CassandraConnector.apply(spark.sparkContext)
+    val connector = CassandraConnector.apply(sparkSession.sparkContext)
 
-    import spark.implicits._
+    import sparkSession.implicits._
 
-    val df = spark
+    val df = sparkSession
       .readStream
       .format("kafka")
       .option("kafka.bootstrap.servers", "localhost:9092")
@@ -69,13 +69,7 @@ object OverCategoryBotDetector {
 
     // #################
     // Count by category
-    val resCat = records
-      .select($"ip", $"category_id", window($"timestamp", WindowDur))
-      .distinct()
-      .groupBy($"ip")
-      .count()
-      .filter($"count">CategoryLimit)
-      .select($"ip")
+    val resCat = detectBotsByCategory(records, sparkSession)
 
     val query = resCat.writeStream
       .outputMode("complete")
@@ -95,5 +89,18 @@ object OverCategoryBotDetector {
       .start()
 
     query.awaitTermination()
+  }
+
+  def detectBotsByCategory(events: DataFrame, sparkSession: SparkSession): DataFrame = {
+
+    import sparkSession.implicits._
+
+    events
+      .select($"ip", $"category_id", window($"timestamp", WindowDur))
+      .distinct()
+      .groupBy($"ip")
+      .count()
+      .filter($"count">CategoryLimit)
+      .select($"ip")
   }
 }

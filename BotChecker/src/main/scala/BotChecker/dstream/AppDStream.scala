@@ -126,8 +126,6 @@ object AppDStream {
         a + b
       }, Seconds(WindowDur), Seconds(SlideDur))
 
-    //nActsStream.print(PRINT_LIMIT)
-
     nActsStream
       .filter(filterByNActs)
       .map(r => r._1)

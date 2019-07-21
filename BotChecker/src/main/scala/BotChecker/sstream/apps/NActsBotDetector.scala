@@ -3,7 +3,7 @@ package BotChecker.sstream.apps
 import BotChecker.sstream.apps.OverCategoryBotDetector.{CassandraKeySpace, CassandraTable, CassandraTtl}
 import com.datastax.spark.connector.cql.CassandraConnector
 import org.apache.spark.SparkConf
-import org.apache.spark.sql.{ForeachWriter, Row, SparkSession}
+import org.apache.spark.sql.{DataFrame, ForeachWriter, Row, SparkSession}
 import org.apache.spark.sql.functions.{from_json, from_unixtime, window}
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 
@@ -37,16 +37,16 @@ object NActsBotDetector {
       .setAppName("SSBotChecker")
       .set("spark.cassandra.connection.keep_alive_ms", "630000")
 
-    val spark = SparkSession
+    val sparkSession = SparkSession
       .builder()
       .config(conf)
       .getOrCreate()
 
-    val connector = CassandraConnector.apply(spark.sparkContext)
+    val connector = CassandraConnector.apply(sparkSession.sparkContext)
 
-    import spark.implicits._
+    import sparkSession.implicits._
 
-    val df = spark
+    val df = sparkSession
       .readStream
       .format("kafka")
       .option("kafka.bootstrap.servers", "localhost:9092")
@@ -69,11 +69,7 @@ object NActsBotDetector {
 
     // #################
     //NActs by ip
-    val resNActs = records
-      .groupBy($"ip", window($"timestamp", WindowDur))
-      .count()
-      .filter($"count">ClicksLimit)
-      .select($"ip")
+    val resNActs = detectBotsByNActs(records, sparkSession)
 
     val query = resNActs.writeStream
         .outputMode("complete")
@@ -93,5 +89,16 @@ object NActsBotDetector {
         .start()
 
     query.awaitTermination()
+  }
+
+  def detectBotsByNActs(events: DataFrame, sparkSession: SparkSession): DataFrame = {
+
+    import sparkSession.implicits._
+
+    events
+      .groupBy($"ip", window($"timestamp", WindowDur))
+      .count()
+      .filter($"count" > ClicksLimit)
+      .select($"ip")
   }
 }

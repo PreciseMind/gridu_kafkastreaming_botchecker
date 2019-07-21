@@ -1,0 +1,18 @@
+# ignore all
+*.idea
+*.iml
+*/target/
+*/__pycache__/
+cisco-jobs/src/main/airflow/dags/__pycache__/
+dependency-reduced-pom.xml
+floop-jobs/src/main/airflow/dags/__pycache__/
+metastore_db
+derby.log
+example/
+in/
+temp.txt
+BotChecker/src/main/scala/BotChecker/CiscoBqColumn.scala
+BotChecker/src/main/scala/BotChecker/CiscoColumn.scala
+BotChecker/src/main/scala/BotChecker/KillServer.scala
+BotChecker/src/main/scala/BotChecker/Test.scala
+BotChecker/src/main/scala/BotChecker/TransformFunctions.scala
