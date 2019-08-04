@@ -2,7 +2,7 @@ import BotChecker.sstream.apps.{NActsBotDetector, OverCategoryBotDetector, OverC
 import org.apache.spark.SparkConf
 import org.apache.spark.sql.functions._
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
-import org.apache.spark.sql.{DataFrame, SparkSession}
+import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, FunSpec}
 
 class BotCheckerSSTest extends FunSpec with
@@ -44,11 +44,12 @@ class BotCheckerSSTest extends FunSpec with
 
       val input = extractTestDataFrame()
 
-      val expectedValue = 1L
+      val botIp = "172.20.0.51"
 
       val result = NActsBotDetector.detectBotsByNActs(input, sparkSession)
+        .filter(row => !botIp.equals(row.getString(0)))
 
-      assertResult(expectedValue)(result.count())
+      assert(result.count() == 0)
     }
 
     it("[SS] OverCategoryBotDetector") {
@@ -57,11 +58,12 @@ class BotCheckerSSTest extends FunSpec with
 
       val input = extractTestDataFrame()
 
-      val expectedValue = 1L
+      val botIp = "172.20.0.51"
 
       val result = OverCategoryBotDetector.detectBotsByCategory(input, sparkSession)
+        .filter(row => !botIp.equals(row.getString(0)))
 
-      assertResult(expectedValue)(result.count())
+      assert(result.count() == 0)
     }
 
     it("[SS] OverClicksAndViewBotDetector") {
@@ -70,11 +72,12 @@ class BotCheckerSSTest extends FunSpec with
 
       val input = extractTestDataFrame()
 
-      val expectedValue = 1L
+      val botIp = "172.20.0.51"
 
       val result = OverClicksAndViewBotDetector.detectBotsByClickAndView(input, sparkSession)
+        .filter(row => !botIp.equals(row.getString(0)))
 
-      assertResult(expectedValue)(result.count())
+      assert(result.count() == 0)
     }
   }
 
@@ -104,16 +107,21 @@ class BotCheckerSSTest extends FunSpec with
 
   val data =
     """{"unix_time": 1540559093, "category_id": 1000, "ip": "172.10.0.51", "type": "click"}
-              {"unix_time": 1540559093, "category_id": 1000, "ip": "172.10.0.51", "type": "view"}
-              {"unix_time": 1540559095, "category_id": 1001, "ip": "172.20.0.51", "type": "click"}
-              {"unix_time": 1540559095, "category_id": 1002, "ip": "172.20.0.51", "type": "view"}
-              {"unix_time": 1540559095, "category_id": 1003, "ip": "172.20.0.51", "type": "click"}
-              {"unix_time": 1540559095, "category_id": 1004, "ip": "172.20.0.51", "type": "view"}
-              {"unix_time": 1540559095, "category_id": 1005, "ip": "172.20.0.51", "type": "click"}
-              {"unix_time": 1540559095, "category_id": 1006, "ip": "172.20.0.51", "type": "view"}
-              {"unix_time": 1540559095, "category_id": 1007, "ip": "172.20.0.51", "type": "click"}
-              {"unix_time": 1540559095, "category_id": 1008, "ip": "172.20.0.51", "type": "view"}"""
+       {"unix_time": 1540559093, "category_id": 1001, "ip": "172.10.0.52", "type": "click"}
+       {"unix_time": 1540559093, "category_id": 1002, "ip": "172.10.0.53", "type": "click"}
+       {"unix_time": 1540559093, "category_id": 1003, "ip": "172.10.0.54", "type": "click"}
+       {"unix_time": 1540559093, "category_id": 1004, "ip": "172.10.0.55", "type": "click"}
+       {"unix_time": 1540559093, "category_id": 1005, "ip": "172.10.0.56", "type": "click"}
+       {"unix_time": 1540559093, "category_id": 1000, "ip": "172.10.0.51", "type": "view"}
+       {"unix_time": 1540559095, "category_id": 1001, "ip": "172.20.0.51", "type": "click"}
+       {"unix_time": 1540559095, "category_id": 1002, "ip": "172.20.0.51", "type": "view"}
+       {"unix_time": 1540559095, "category_id": 1003, "ip": "172.20.0.51", "type": "click"}
+       {"unix_time": 1540559095, "category_id": 1004, "ip": "172.20.0.51", "type": "view"}
+       {"unix_time": 1540559095, "category_id": 1005, "ip": "172.20.0.51", "type": "click"}
+       {"unix_time": 1540559095, "category_id": 1006, "ip": "172.20.0.51", "type": "view"}
+       {"unix_time": 1540559095, "category_id": 1007, "ip": "172.20.0.51", "type": "click"}
+       {"unix_time": 1540559095, "category_id": 1008, "ip": "172.20.0.51", "type": "view"}"""
 
-  val additionalClick = """{"unix_time": 1540559095, "category_id": 1007, "ip": "172.20.0.51", "type": "click"}"""
+  val additionalClick = """{"unix_time": 1540559096, "category_id": 1007, "ip": "172.20.0.51", "type": "click"}"""
 
 }

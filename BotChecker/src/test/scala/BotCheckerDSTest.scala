@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
 import org.apache.spark.streaming.dstream.DStream
-import org.apache.spark.streaming.{Milliseconds, StreamingContext}
+import org.apache.spark.streaming.{Milliseconds, StreamingContext, Time}
 import org.apache.spark.{SparkConf, SparkContext}
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, FunSpec}
 
@@ -53,24 +53,34 @@ class BotCheckerDSTest extends FunSpec with
 
       val input = extractTestDS()
 
+      val botIp = "172.20.0.51"
+
       AppDStream.detectBotsByNActs(input)
-        .count().foreachRDD(rdd => assertResult(1L)(rdd.count()))
+        .filter(ip => !botIp.equals(ip))
+        .foreachRDD(rdd => assert(rdd.isEmpty()))
     }
-  }
 
-  it("[DStream] OverCategoryBotDetector") {
+    it("[DStream] OverCategoryBotDetector") {
 
-    val input = extractTestDS()
+      val input = extractTestDS()
 
-    AppDStream.detectBotsByCategory(input)
-      .count().foreachRDD(rdd => assertResult(1L)(rdd.count()))
-  }
+      val botIp = "172.20.0.51"
 
-  it("[DStream] OverClicksAndViewBotDetector") {
+      AppDStream.detectBotsByCategory(input)
+        .filter(ip => !botIp.equals(ip))
+        .foreachRDD(rdd => assert(rdd.isEmpty()))
+    }
 
-    val input = extractTestDS()
-    AppDStream.detectBotsByClickAndView(input)
-      .count().foreachRDD(rdd => assertResult(1L)(rdd.count()))
+    it("[DStream] OverClicksAndViewBotDetector") {
+
+      val input = extractTestDS()
+
+      val botIp = "172.20.0.51"
+
+      AppDStream.detectBotsByClickAndView(input)
+        .filter(ip => !botIp.equals(ip))
+        .foreachRDD(rdd => assert(rdd.isEmpty()))
+    }
   }
 
   def generateTestSeq(): Seq[String] = {
